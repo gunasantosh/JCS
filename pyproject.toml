@@ -9,7 +9,7 @@ dependencies = [
     "uvicorn[standard]",
     "pytest",
     "ruff",
-    "mypy"
+    "mypy","python-dotenv",
 ]
 
 [project.scripts]
