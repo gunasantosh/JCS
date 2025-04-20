@@ -2,15 +2,19 @@
 name = "jcs"
 version = "0.1.0"
 description = "JCS AI bot"
-requires-python = ">=3.8"
+requires-python = ">=3.12"
 
-dependencies = [
-    "fastapi",
-    "uvicorn[standard]",
-    "pytest",
-    "ruff",
-    "mypy","python-dotenv",
+authors = [
+    { name = "B.Guna", email = "gunasantosh999@gmail.com" }
 ]
 
-[project.scripts]
-start = "uvicorn app.main:app --reload"
+dependencies = [
+    "pytest",
+    "ruff",
+    "mypy",
+    "python-dotenv",
+    "openai>=1.75.0",
+    "uvicorn>=0.34.2",
+    "fastapi[standard]>=0.115.12",
+]
+
