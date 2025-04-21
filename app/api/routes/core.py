@@ -9,14 +9,48 @@ import tempfile
 import shutil
 import os
 from llama_index.core import SimpleDirectoryReader, VectorStoreIndex
+from llama_index.core.schema import Document
 from llama_index.embeddings.openai import OpenAIEmbedding
 from llama_index.llms.openai import OpenAI
 
+from PIL import Image
+import pytesseract
+import fitz  # PyMuPDF
 
 load_dotenv()
 
 router = APIRouter()
 openai_client = OpenAI()
+
+
+def extract_text_from_image(file_path: str) -> str:
+    image = Image.open(file_path)
+    return pytesseract.image_to_string(image)
+
+
+def extract_text_from_pdf(file_path: str) -> str:
+    doc = fitz.open(file_path)
+    full_text = ""
+    for page in doc:
+        text = page.get_text()
+        if text.strip():
+            full_text += text
+        else:
+            # If page has no text, fallback to OCR on image
+            pix = page.get_pixmap(dpi=300)
+            image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            ocr_text = pytesseract.image_to_string(image)
+            full_text += ocr_text
+    doc.close()
+    return full_text
+
+
+def extract_text_via_ocr(file_path: str) -> Optional[str]:
+    if file_path.lower().endswith((".png", ".jpg", ".jpeg", ".tiff", ".bmp")):
+        return extract_text_from_image(file_path)
+    elif file_path.lower().endswith(".pdf"):
+        return extract_text_from_pdf(file_path)
+    return None
 
 
 @router.get("/")
@@ -48,30 +82,38 @@ async def chat(
         )
         return {"response": response.choices[0].message.content}
 
-    elif task_info.task == "summarization" and files or task_info.task == "file Q&A":
+    elif task_info.task in ["summarization", "file Q&A"]:
         temp_dir = tempfile.mkdtemp()
         try:
-            # Save each file to the temp directory
+            documents = []
+
+            # Save each file and handle based on type
             for file in files:
                 file_path = os.path.join(temp_dir, file.filename)
                 with open(file_path, "wb") as f:
                     f.write(file.file.read())
 
-            # Use the files (example: llama-index SimpleDirectoryReader)
-            documents = SimpleDirectoryReader(temp_dir).load_data()
-            openai_embeddings=OpenAIEmbedding(model="text-embedding-3-small")
-            llm_querying=OpenAI(model="gpt-3.5-turbo")
+                if file.filename.lower().endswith((".txt", ".md", ".docx")):
+                    with open(file_path, "r", encoding="utf-8") as f:
+                        content = f.read()
+                    documents.append(Document(text=content, metadata={"filename": file.filename}))
+                else:
+                    ocr_text = extract_text_via_ocr(file_path)
+                    if ocr_text:
+                        documents.append(Document(text=ocr_text, metadata={"filename": file.filename}))
 
-            # Create vector index
+            if not documents:
+                return {"message": "No readable or extractable content found in uploaded files."}
+
+            openai_embeddings = OpenAIEmbedding(model="text-embedding-3-small")
+            llm_querying = OpenAI(model="gpt-3.5-turbo")
+
             index = VectorStoreIndex.from_documents(documents, embed_model=openai_embeddings)
-
             query_engine = index.as_query_engine(llm=llm_querying)
             response = query_engine.query(prompt)
             return str(response)
 
-
         finally:
-            # Always clean up the temp directory
             shutil.rmtree(temp_dir)
 
     return {"message": "Task not recognized or unsupported."}
